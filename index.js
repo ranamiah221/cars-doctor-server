@@ -1,15 +1,37 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app=express();
 const port = process.env.PORT || 5000;
 
 // MIDDLE WARE
-app.use(cors())
+app.use(cors({
+  origin:[
+    'http://localhost:5173'
+  ],
+  credentials: true,
+}))
 app.use(express.json())
+app.use(cookieParser())
 
 
+// verify token middleware...
+const verifyToken= async(req, res, next)=>{
+ const token = req.cookies?.token;
+ if(!token){
+  return res.status(401).send({message: 'unauthorized access'})
+ }
+ jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded)=>{
+  if(err){
+    return res.status(401).send({message: "unauthorized access"})
+  }
+  req.user = decoded;
+  next();
+ })
+}
 
 
  const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ungcn7e.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -29,6 +51,9 @@ async function run() {
     await client.connect();
     const servicesCollection = client.db('carsDB').collection('services');
     const bookingCollection = client.db('carsDB').collection('booking');
+
+
+  //  services api
     app.get('/services', async(req, res)=>{
         const cursor = servicesCollection.find()
         const result = await cursor.toArray()
@@ -43,7 +68,12 @@ async function run() {
     })
 
     // booking collection operation...
-    app.get('/booking', async(req, res)=>{
+    app.get('/booking',verifyToken, async(req, res)=>{
+      console.log(req.query?.email);
+      console.log("token owner info", req?.user)
+      if(req.query?.email !== req.user.email){
+        return res.status(403).send({message: 'forbidden access'})
+      }
       let query={};
       if(req.query?.email){
         query= {
@@ -81,6 +111,23 @@ async function run() {
     res.send(result)
    })
 
+
+    // auth verify api
+    app.post('/jwt', async(req, res)=>{
+      const user = req.body;
+       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET,{ expiresIn: '1h' })
+      res
+      .cookie('token', token , {
+        httpOnly: true,
+        secure: false,
+      })
+      .send({success: true})
+     })
+    //  cookie remove for user logout
+    app.post('/logout', async(req, res)=>{
+      const user = req.body;
+      res.clearCookie('token', { maxAge: 0 }).send({success: true})
+    })
 
 
     // Send a ping to confirm a successful connection
